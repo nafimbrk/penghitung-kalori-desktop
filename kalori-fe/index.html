@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Penghitung Kalori Olahraga</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body class="bg-light">
+
+    <div class="container py-5">
+        <h1 class="text-center mb-4">Penghitung Kalori Olahraga</h1>
+
+        <!-- Form Input -->
+        <div class="card shadow-sm p-4 mb-4">
+            <form id="exercise-form" class="row g-3">
+                <div class="col-md-6">
+                    <label for="exercise-type" class="form-label">Pilih Jenis Olahraga</label>
+                    <select id="exercise-type" name="exercise-type" class="form-select">
+                        <option value="running">Lari</option>
+                        <option value="cycling">Bersepeda</option>
+                        <option value="swimming">Berenang</option>
+                        <option value="walking">Berjalan</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label for="duration" class="form-label">Durasi Latihan (menit)</label>
+                    <input type="number" id="duration" name="duration" min="1" class="form-control" required>
+                </div>
+                <div class="col-12">
+                    <button id="submit-btn" type="submit" class="btn btn-primary w-100">Tambah</button>
+                    <button id="cancel-btn" type="button" class="btn btn-secondary w-100 mt-2 d-none">Batal</button>
+                </div>                
+            </form>
+        </div>
+
+        
+        <!-- Hasil Kalori -->
+        <div id="calories-result" class="alert alert-info text-center d-none"></div>
+        
+        <!-- Riwayat Latihan -->
+        <h2 class="text-center">Riwayat Latihan</h2>
+        <ul id="history-list" class="list-group mt-3"></ul>
+        
+        <button id="view-report" class="btn btn-secondary w-100 mt-4" onclick="window.location.href='report.html';">Lihat Laporan</button>
+        <!-- Tombol Sinkronisasi -->
+        <div class="d-flex justify-content-between mb-4 mt-4">
+            <button id="sync-to-server" class="btn btn-success w-50 me-2">⬆️ Sinkron ke Server</button>
+            <button id="sync-from-server" class="btn btn-warning w-50">⬇️ Sinkron dari Server</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // Inisialisasi IndexedDB
+        let db;
+        const request = indexedDB.open("ExerciseDB", 1);
+
+        request.onerror = () => console.error("Gagal membuka database.");
+        request.onsuccess = (event) => {
+            db = event.target.result;
+            displayHistory();
+        };
+        request.onupgradeneeded = (event) => {
+            db = event.target.result;
+            const objectStore = db.createObjectStore("exercises", { keyPath: "id", autoIncrement: true });
+            objectStore.createIndex("type", "type", { unique: false });
+            objectStore.createIndex("duration", "duration", { unique: false });
+            objectStore.createIndex("calories", "calories", { unique: false });
+        };
+
+        // Fungsi menghitung kalori
+        function calculateCalories(type, duration) {
+            const caloriesPerMinute = { running: 10, cycling: 8, swimming: 11, walking: 4 };
+            return caloriesPerMinute[type] * duration;
+        }
+
+        // Tambah data ke IndexedDB
+        function addExercise(type, duration) {
+            const calories = calculateCalories(type, duration);
+            const transaction = db.transaction(["exercises"], "readwrite");
+            const store = transaction.objectStore("exercises");
+            const exercise = { type, duration, calories };
+
+            const request = store.add(exercise);
+            request.onsuccess = () => {
+                showResult(`🔥 ${calories} kalori terbakar selama ${duration} menit ${type}.`);
+                displayHistory();
+            };
+            request.onerror = () => console.error("Gagal menambahkan data.");
+        }
+
+        // Tampilkan hasil kalori
+        function showResult(message) {
+            const resultDiv = document.getElementById("calories-result");
+            resultDiv.textContent = message;
+            resultDiv.classList.remove("d-none");
+        }
+
+        // Tampilkan riwayat latihan
+        function displayHistory() {
+            const historyList = document.getElementById("history-list");
+            historyList.innerHTML = "";
+            const transaction = db.transaction(["exercises"], "readonly");
+            const store = transaction.objectStore("exercises");
+
+            store.openCursor().onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (cursor) {
+                    const item = cursor.value;
+                    const listItem = document.createElement("li");
+                    listItem.className = "list-group-item d-flex justify-content-between align-items-center";
+                    listItem.innerHTML = `
+                        ${item.type} - ${item.duration} menit - 🔥 ${item.calories} kalori
+                        <button class="btn btn-sm btn-danger" onclick="deleteExercise(${item.id})">Hapus</button>
+                    `;
+                    historyList.appendChild(listItem);
+                    cursor.continue();
+                }
+            };
+        }
+
+        // Hapus data latihan
+        function deleteExercise(id) {
+            const transaction = db.transaction(["exercises"], "readwrite");
+            const store = transaction.objectStore("exercises");
+            const request = store.delete(id);
+            request.onsuccess = () => displayHistory();
+            request.onerror = () => console.error("Gagal menghapus data.");
+        }
+
+        // Tangani submit form
+        document.getElementById("exercise-form").addEventListener("submit", function (e) {
+            e.preventDefault();
+            const type = document.getElementById("exercise-type").value;
+            const duration = parseInt(document.getElementById("duration").value);
+            if (duration > 0) addExercise(type, duration);
+            else alert("Durasi harus lebih dari 0.");
+            this.reset();
+            document.getElementById("calories-result").classList.add("d-none");
+        });
+
+        // 🔄 Fungsi Sinkron ke Server
+        document.getElementById("sync-to-server").addEventListener("click", function() {
+            const transaction = db.transaction(["exercises"], "readonly");
+            const store = transaction.objectStore("exercises");
+            const allData = [];
+
+            store.openCursor().onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (cursor) {
+                    allData.push(cursor.value);
+                    cursor.continue();
+                } else {
+                    // Kirim data ke API Laravel
+                    $.ajax({
+    url: "http://localhost:8000/api/exercises/sync",
+    method: "POST",
+    headers: { "Accept": "application/json" },
+    contentType: "application/json",
+    data: JSON.stringify(allData),
+    success: () => alert("✅ Data berhasil disinkron ke server."),
+    error: (xhr) => {
+        console.error(xhr.responseText);
+        alert("❌ Gagal sinkron ke server.");
+    }
+});
+
+                }
+            };
+        });
+
+        // 🔄 Fungsi Sinkron dari Server
+        document.getElementById("sync-from-server").addEventListener("click", function() {
+            $.ajax({
+    url: "http://localhost:8000/api/exercises/sync",
+    method: "GET",
+    headers: { "Accept": "application/json" },
+    success: (serverData) => {
+        const transaction = db.transaction(["exercises"], "readwrite");
+        const store = transaction.objectStore("exercises");
+
+        serverData.forEach(item => {
+            const { type, duration, calories } = item;
+            store.put({ type, duration, calories });
+        });
+
+        transaction.oncomplete = () => {
+            displayHistory();
+            alert("✅ Data dari server berhasil disinkron.");
+        };
+        transaction.onerror = () => alert("❌ Gagal sinkron dari server.");
+    },
+    error: (xhr) => {
+        console.error(xhr.responseText);
+        alert("❌ Gagal sinkron dari server.");
+    }
+});
+
+        });
+
+
+
+
+
+
+</script>
+</body>
+</html>
